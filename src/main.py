@@ -1,6 +1,7 @@
 import base64
 import json
 import pickle
+from io import BytesIO
 
 import cv2
 import numpy
@@ -18,6 +19,23 @@ data = {'access_key': accessKey, 'secret_key': secretKey}
 
 class MyJSONEncoder(JSONEncoder):
     def default(self, obj):
+        if isinstance(obj, Store):
+            return {
+                'name': obj.name,
+                'location': obj.location,
+                'description': obj.description,
+                'cloth_list': obj.cloth_list,
+            }
+        if isinstance(obj, Cloth):
+            return {
+                'name': obj.name,
+                'photo_id': obj.photo_id,
+                'photo_data': obj.photo_data,
+                'price': obj.price,
+                'colors': obj.colors,
+                'styles': obj.styles,
+                'garments': obj.garments,
+            }
         if isinstance(obj, User):
             return {
                 'name': obj.name,
@@ -26,6 +44,7 @@ class MyJSONEncoder(JSONEncoder):
                 'top_colors_hex': obj.top_colors_hex,
                 'top_styles': obj.top_styles,
                 'top_garment': obj.top_garment,
+                'wishlist': obj.wishlist,
             }
         if isinstance(obj, Photo):
             return {
@@ -59,6 +78,7 @@ class MyJSONEncoder(JSONEncoder):
 app = Flask(__name__)
 app.json_encoder = MyJSONEncoder
 users = {}
+stores = {}
 
 
 def save():
@@ -87,7 +107,7 @@ def get_user():
         abort(404)
     else:
         user = users[user_id]
-        return jsonify({'user': user})
+        return jsonify(user)
 
 
 @app.route('/getusertop', methods=['GET'])
@@ -115,10 +135,81 @@ def new_user():
     return jsonify({'user_id': id, 'user': u})
 
 
+@app.route('/newstore', methods=['POST'])
+def new_store():
+    store_name = request.values['name']
+    store_location = request.values['location']
+    store_desc = request.values['description']
+    if store_name is None:
+        abort(400)
+    s = Store()
+    s.name = store_name
+    s.location = store_location
+    s.description = store_desc
+    id = len(stores)
+    stores[id] = s
+    return jsonify({'store_id': id, 'store': s})
+
+
+@app.route('/addcloth', methods=['POST'])
+def add_cloth():
+    store_id = int(request.values['store_id'])
+    price = float(request.values['price'])
+    name = request.values['name']
+    data = request.files['img_data']
+    if store_id not in stores:
+        abort(400)
+    s = stores[store_id]
+    id = len(s.cloth_list)
+    p = Cloth()
+    p.name = name
+    p.store_id = store_id
+    p.price = price
+    p.photo_id = id
+    filestr = data.read()
+    npimg = numpy.fromstring(filestr, numpy.uint8)
+    img = cv2.imdecode(npimg, cv2.IMREAD_COLOR)
+    img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+    im_pil = Image.fromarray(img)
+    im_pil.save('stemp.png')
+    enc = open('stemp.png', 'rb')
+    filename = {'filename': enc}
+    r = requests.post(url, files=filename, data=data)
+    if not r:
+        print(r.text)
+        return False
+    content = json.loads(r.content)
+    print(content)
+    with open("stemp.png", "rb") as image_file:
+        p.photo_data = str(base64.b64encode(image_file.read()))
+    for color in content['person']['colors']:
+        c = Color()
+        c.hex = color['hex']
+        c.color_name = color['colorName']
+        c.category = color['colorGeneralCategory']
+        c.ratio = float(color['ratio'])
+        p.colors.append(c)
+    p.colors.sort()
+    for style in content['person']['styles']:
+        s = Style()
+        s.name = style['styleName']
+        s.confidence = float(style['confidence'])
+        p.styles.append(s)
+    p.styles.sort()
+    for garment in content['person']['garments']:
+        g = Garment()
+        g.name = garment['typeName']
+        g.confidence = float(garment['confidence'])
+        g.bounding_box = garment['boundingBox']
+        p.garments.append(g)
+    p.garments.sort()
+    return jsonify({'message': 'success'})
+
+
 @app.route('/newphoto', methods=['POST'])
 def new_photo():
     user_id = int(request.values['user_id'])
-    data = request.files['img_data']
+    data = request.values['img_data']
     if user_id is None or data is None:
         abort(400)
     if user_id not in users:
@@ -129,23 +220,89 @@ def new_photo():
     return jsonify({'message': 'success'})
 
 
+@app.route('/suggestwithphoto', methods=['POST'])
+def suggestwithphoto():
+    data = request.values['img_data']
+    if data is None:
+        abort(400)
+    p = getphotodetails(data)
+    if p is None:
+        abort(400)
+    stores_list = []
+    for s_id in stores:
+        s = stores[s_id]
+        
+    return jsonify({'stores': stores_list})
+
+
+@app.route('/getphotodetails', methods=['POST'])
+def getdetails():
+    user_id = int(request.values['user_id'])
+    data = request.files['img_data']
+    if user_id is None or data is None:
+        abort(400)
+    if user_id not in users:
+        abort(404)
+    p = getphotodetails(data, user_id)
+    if p is None:
+        abort(400)
+    return jsonify(p)
+
+
+def getphotodetails(b64, user_id=None):
+    im_pil = Image.open(BytesIO(base64.b64decode(b64)))
+    im_pil.save('temp.jpeg', quality=50)
+    enc = open('temp.jpeg', 'rb')
+    p = Photo()
+    filename = {'filename': enc}
+    if user_id is not None:
+        print('api requesting for {}'.format(users[user_id].name))
+    r = requests.post(url, files=filename, data=data)
+    if not r:
+        print(r.text)
+        return None
+    content = json.loads(r.content)
+    print(content)
+    with open("temp.png", "rb") as image_file:
+        p.photo_data = str(base64.b64encode(image_file.read()))
+    for color in content['person']['colors']:
+        c = Color()
+        c.hex = color['hex']
+        c.color_name = color['colorName']
+        c.category = color['colorGeneralCategory']
+        c.ratio = float(color['ratio'])
+        p.colors.append(c)
+    p.colors.sort()
+    for style in content['person']['styles']:
+        s = Style()
+        s.name = style['styleName']
+        s.confidence = float(style['confidence'])
+        p.styles.append(s)
+    p.styles.sort()
+    for garment in content['person']['garments']:
+        g = Garment()
+        g.name = garment['typeName']
+        g.confidence = float(garment['confidence'])
+        g.bounding_box = garment['boundingBox']
+        p.garments.append(g)
+    p.garments.sort()
+    return p
+
+
 class User:
     def __init__(self):
         self.name = None
         self.photos = []
+        self.wishlist = []
         self.top_colors = []
         self.top_colors_hex = []
         self.top_styles = []
         self.top_garment = []
 
-    def add_photo(self, file):
-        filestr = file.read()
-        npimg = numpy.fromstring(filestr, numpy.uint8)
-        img = cv2.imdecode(npimg, cv2.IMREAD_COLOR)
-        img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-        im_pil = Image.fromarray(img)
-        im_pil.save('temp.png')
-        enc = open('temp.png', 'rb')
+    def add_photo(self, b64):
+        im_pil = Image.open(BytesIO(base64.b64decode(b64)))
+        im_pil.save('temp.jpeg', quality=50)
+        enc = open('temp.jpeg', 'rb')
         p = Photo()
         p.photo_id = len(self.photos)
         filename = {'filename': enc}
@@ -156,7 +313,7 @@ class User:
             return False
         content = json.loads(r.content)
         print(content)
-        with open("temp.png", "rb") as image_file:
+        with open("temp.jpeg", "rb") as image_file:
             p.photo_data = str(base64.b64encode(image_file.read()))
         for color in content['person']['colors']:
             c = Color()
@@ -192,10 +349,9 @@ class User:
                 name = color.color_name.replace("_", " ").title()
                 if name not in colors_dict:
                     colors_dict[name] = color.ratio
-                    hex_dict[color.hex] = color.ratio
+                    hex_dict[name] = color.hex
                 else:
                     colors_dict[name] += color.ratio
-                    hex_dict[color.hex] += color.ratio
             for garment in photo.garments:
                 if garment.name not in garments_dict:
                     garments_dict[garment.name] = garment.confidence
@@ -213,15 +369,13 @@ class User:
         colortuple = sorted(colors_dict.items(), reverse=True, key=lambda x: x[1])
         for elem in colortuple:
             self.top_colors.append(elem[0])
+            self.top_colors_hex.append(hex_dict[elem[0]])
         garmenttuple = sorted(garments_dict.items(), reverse=True, key=lambda x: x[1])
         for elem in garmenttuple:
             self.top_garment.append(elem[0])
         styletuple = sorted(styles_dict.items(), reverse=True, key=lambda x: x[1])
         for elem in styletuple:
             self.top_styles.append(elem[0])
-        hextuple = sorted(hex_dict.items(), reverse=True, key=lambda x: x[1])
-        for elem in hextuple:
-            self.top_colors_hex.append(elem[0])
 
 
 class Photo:
@@ -232,10 +386,6 @@ class Photo:
         self.styles = []
         self.garments = []
 
-    def toJSON(self):
-        return json.dumps(self, default=lambda o: o.__dict__,
-                          sort_keys=True, indent=4)
-
 
 class Style:
     def __init__(self):
@@ -244,10 +394,6 @@ class Style:
 
     def __lt__(self, other):
         return self.confidence < self.confidence
-
-    def toJSON(self):
-        return json.dumps(self, default=lambda o: o.__dict__,
-                          sort_keys=True, indent=4)
 
 
 class Garment:
@@ -258,10 +404,6 @@ class Garment:
 
     def __lt__(self, other):
         return self.confidence < self.confidence
-
-    def toJSON(self):
-        return json.dumps(self, default=lambda o: o.__dict__,
-                          sort_keys=True, indent=4)
 
 
 class Color:
@@ -274,9 +416,24 @@ class Color:
     def __lt__(self, other):
         return self.ratio < other.ratio
 
-    def toJSON(self):
-        return json.dumps(self, default=lambda o: o.__dict__,
-                          sort_keys=True, indent=4)
+
+class Store:
+    def __init__(self):
+        self.name = None
+        self.location = None
+        self.description = None
+        self.cloth_list = []
+
+    def __lt__(self, other):
+        return self.name.__lt__(other.name)
+
+
+class Cloth(Photo):
+    def __init__(self):
+        super().__init__()
+        self.name = None
+        self.store_id = None
+        self.price = None
 
 
 if __name__ == '__main__':

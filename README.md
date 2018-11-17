@@ -57,8 +57,7 @@ This is a simple REST server that is used during Aickathon 2018
   ```
   - sample success response
   ```
-    {
-    "user": {
+     {
       "name": "Tan", 
       "photos": [
         {
@@ -131,7 +130,7 @@ This is a simple REST server that is used during Aickathon 2018
         "Outdoor"
       ]
     }
-  }
+
   ```
   
  4. Get user top preferences
