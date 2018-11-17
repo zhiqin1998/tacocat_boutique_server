@@ -8,7 +8,7 @@ This is a simple REST server that is used during Aickathon 2018
 2. cd into the directory
 3. run `pip install -r requirements.txt`
 4. run `python src/main.py`
-
+5. take note of the url address in console (or usually url is YOUR_IP:5000)
 # Available Request
 1. Create new user
   - Description: Create a new user with a name. Remember to save the user_id to reference back the user
