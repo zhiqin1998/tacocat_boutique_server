@@ -85,12 +85,19 @@ stores = {}
 
 
 def save():
-    pickle.dump(users, 'data/users.pickle')
+    with open('data/users.pickle', 'wb') as handle:
+        pickle.dump(users, handle, protocol=pickle.HIGHEST_PROTOCOL)
+    with open('data/stores.pickle', 'wb') as handle:
+        pickle.dump(stores, handle, protocol=pickle.HIGHEST_PROTOCOL)
 
 
 def load():
     global users
-    users = pickle.load('data/users.pickle')
+    with open('data/users.pickle', 'rb') as handle:
+        users = pickle.load(handle)
+    global stores
+    with open('data/stores.pickle', 'rb') as handle:
+        stores = pickle.load(handle)
 
 
 @app.errorhandler(werkzeug.exceptions.BadRequest)
@@ -110,6 +117,7 @@ def get_user():
         abort(404)
     else:
         user = users[user_id]
+        user.update_top()
         return jsonify(user)
 
 
@@ -180,6 +188,7 @@ def add_cloth():
     p.store_name = store.name
     p.location = store.location
     p.price = price
+    p.confidence = 0.00
     p.photo_id = id
     filestr = bindata.read()
     npimg = numpy.fromstring(filestr, numpy.uint8)
@@ -206,6 +215,7 @@ def add_cloth():
         c = Color()
         c.hex = color['hex']
         c.color_name = color['colorName']
+        c.color_name = c.color_name.replace("_", " ").title()
         c.category = color['colorGeneralCategory']
         c.ratio = float(color['ratio'])
         p.colors.append(c)
@@ -253,16 +263,20 @@ def suggestwithphoto():
     for s_id in stores:
         s = stores[s_id]
         for c in s.cloth_list:
-            if c.garments[0].name in p.garments:
-                added = False
+            got = False
+            for garment in c.garments:
+                if garment.name in p.garments:
+                    got = True
+                    break
+            if got:
+                c.confidence = 0.00
                 for color in c.colors:
-                    if color.color_name in p.colors and not added:
-                        cloth_list.append(c)
-                        added = True
+                    if color.color_name in p.colors:
+                        c.confidence += color.ratio
                 for style in c.styles:
-                    if style.name in p.styles and not added:
-                        cloth_list.append(c)
-                        added = True
+                    if style.name in p.styles:
+                        c.confidence += style.confidence
+                cloth_list.append(c)
     cloth_list.sort(reverse=True)
     return jsonify({'cloth_list': cloth_list})
 
@@ -278,16 +292,21 @@ def suggestwithoutphoto():
     for s_id in stores:
         s = stores[s_id]
         for c in s.cloth_list:
-            # if c.garments[0].name in u.top_garment:
-            added = False
-            for color in c.colors:
-                if color.color_name in u.top_colors and not added:
+            got = False
+            for garment in c.garments:
+                if garment.name in u.top_garment:
+                    got = True
+                    break
+            if got:
+                c.confidence = 0.00
+                for color in c.colors:
+                    if color.color_name in u.top_colors:
+                        c.confidence += color.ratio
+                for style in c.styles:
+                    if style.name in u.top_styles:
+                        c.confidence += style.confidence
+                if c.confidence > 0.5:
                     cloth_list.append(c)
-                    added = True
-            for style in c.styles:
-                if style.name in u.top_styles and not added:
-                    cloth_list.append(c)
-                    added = True
     cloth_list.sort(reverse=True)
     return jsonify({'cloth_list': cloth_list})
 
@@ -331,6 +350,7 @@ def getphotodetails(b64, user_id=None):
         c = Color()
         c.hex = color['hex']
         c.color_name = color['colorName']
+        c.color_name = c.color_name.replace("_", " ").title()
         c.category = color['colorGeneralCategory']
         c.ratio = float(color['ratio'])
         p.colors.append(c)
@@ -386,6 +406,7 @@ class User:
             c = Color()
             c.hex = color['hex']
             c.color_name = color['colorName']
+            c.color_name = c.color_name.replace("_", " ").title()
             c.category = color['colorGeneralCategory']
             c.ratio = float(color['ratio'])
             p.colors.append(c)
@@ -413,7 +434,7 @@ class User:
         hex_dict = {}
         for photo in self.photos:
             for color in photo.colors:
-                name = color.color_name.replace("_", " ").title()
+                name = color.color_name
                 if name not in colors_dict:
                     colors_dict[name] = color.ratio
                     hex_dict[name] = color.hex
@@ -509,13 +530,15 @@ class Cloth(Photo):
         self.store_name = None
         self.store_id = None
         self.price = None
-
-    def confident(self):
-        return self.colors[0].ratio + self.styles[0].confidence
+        self.confidence = None
 
     def __lt__(self, other):
-        return self.confident() < other.confident()
+        return self.confidence < other.confidence
 
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', debug=True)
+    try:
+        load()
+        app.run(host='0.0.0.0', debug=True)
+    finally:
+        save()
