@@ -35,6 +35,9 @@ class MyJSONEncoder(JSONEncoder):
                 'colors': obj.colors,
                 'styles': obj.styles,
                 'garments': obj.garments,
+                'store_name': obj.store_name,
+                'store_id': obj.store_id,
+                'location': obj.location,
             }
         if isinstance(obj, User):
             return {
@@ -100,7 +103,7 @@ def index():
     return json.dumps(users)
 
 
-@app.route('/getuser', methods=['GET'])
+@app.route('/getuser', methods=['POST'])
 def get_user():
     user_id = int(request.values['user_id'])
     if user_id not in users:
@@ -110,7 +113,17 @@ def get_user():
         return jsonify(user)
 
 
-@app.route('/getusertop', methods=['GET'])
+@app.route('/getstore', methods=['POST'])
+def get_store():
+    store_id = int(request.values['store_id'])
+    if store_id not in stores:
+        abort(404)
+    else:
+        store = stores[store_id]
+        return jsonify(store)
+
+
+@app.route('/getusertop', methods=['POST'])
 def get_user_top():
     user_id = int(request.values['user_id'])
     if user_id not in users:
@@ -156,23 +169,25 @@ def add_cloth():
     store_id = int(request.values['store_id'])
     price = float(request.values['price'])
     name = request.values['name']
-    data = request.files['img_data']
+    bindata = request.files['img_data']
     if store_id not in stores:
         abort(400)
-    s = stores[store_id]
-    id = len(s.cloth_list)
+    store = stores[store_id]
+    id = len(store.cloth_list)
     p = Cloth()
     p.name = name
     p.store_id = store_id
+    p.store_name = store.name
+    p.location = store.location
     p.price = price
     p.photo_id = id
-    filestr = data.read()
+    filestr = bindata.read()
     npimg = numpy.fromstring(filestr, numpy.uint8)
     img = cv2.imdecode(npimg, cv2.IMREAD_COLOR)
     img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
     im_pil = Image.fromarray(img)
-    im_pil.save('stemp.png')
-    enc = open('stemp.png', 'rb')
+    im_pil.save('stemp.jpeg')
+    enc = open('stemp.jpeg', 'rb')
     filename = {'filename': enc}
     r = requests.post(url, files=filename, data=data)
     if not r:
@@ -180,7 +195,12 @@ def add_cloth():
         return False
     content = json.loads(r.content)
     print(content)
-    with open("stemp.png", "rb") as image_file:
+    try:
+        if len(content['person']['garments'])==0:
+            return jsonify({'error': 'failed no garment found'})
+    except KeyError:
+        return jsonify({'error': 'failed no person found'})
+    with open("stemp.jpeg", "rb") as image_file:
         p.photo_data = str(base64.b64encode(image_file.read()))
     for color in content['person']['colors']:
         c = Color()
@@ -189,20 +209,21 @@ def add_cloth():
         c.category = color['colorGeneralCategory']
         c.ratio = float(color['ratio'])
         p.colors.append(c)
-    p.colors.sort()
+    p.colors.sort(reverse=True)
     for style in content['person']['styles']:
         s = Style()
         s.name = style['styleName']
         s.confidence = float(style['confidence'])
         p.styles.append(s)
-    p.styles.sort()
+    p.styles.sort(reverse=True)
     for garment in content['person']['garments']:
         g = Garment()
         g.name = garment['typeName']
         g.confidence = float(garment['confidence'])
         g.bounding_box = garment['boundingBox']
         p.garments.append(g)
-    p.garments.sort()
+    p.garments.sort(reverse=True)
+    store.cloth_list.append(p)
     return jsonify({'message': 'success'})
 
 
@@ -228,17 +249,53 @@ def suggestwithphoto():
     p = getphotodetails(data)
     if p is None:
         abort(400)
-    stores_list = []
+    cloth_list = []
     for s_id in stores:
         s = stores[s_id]
-        
-    return jsonify({'stores': stores_list})
+        for c in s.cloth_list:
+            if c.garments[0].name in p.garments:
+                added = False
+                for color in c.colors:
+                    if color.color_name in p.colors and not added:
+                        cloth_list.append(c)
+                        added = True
+                for style in c.styles:
+                    if style.name in p.styles and not added:
+                        cloth_list.append(c)
+                        added = True
+    cloth_list.sort(reverse=True)
+    return jsonify({'cloth_list': cloth_list})
+
+
+@app.route('/suggestwithoutphoto', methods=['POST'])
+def suggestwithoutphoto():
+    user_id = int(request.values['user_id'])
+    if user_id is None:
+        abort(400)
+    u = users[user_id]
+    u.update_top()
+    cloth_list = []
+    for s_id in stores:
+        s = stores[s_id]
+        for c in s.cloth_list:
+            # if c.garments[0].name in u.top_garment:
+            added = False
+            for color in c.colors:
+                if color.color_name in u.top_colors and not added:
+                    cloth_list.append(c)
+                    added = True
+            for style in c.styles:
+                if style.name in u.top_styles and not added:
+                    cloth_list.append(c)
+                    added = True
+    cloth_list.sort(reverse=True)
+    return jsonify({'cloth_list': cloth_list})
 
 
 @app.route('/getphotodetails', methods=['POST'])
 def getdetails():
     user_id = int(request.values['user_id'])
-    data = request.files['img_data']
+    data = request.values['img_data']
     if user_id is None or data is None:
         abort(400)
     if user_id not in users:
@@ -263,6 +320,11 @@ def getphotodetails(b64, user_id=None):
         return None
     content = json.loads(r.content)
     print(content)
+    try:
+        if len(content['person']['garments'])==0:
+            return jsonify({'error': 'failed no garment found'})
+    except KeyError:
+        return jsonify({'error': 'failed no person found'})
     with open("temp.png", "rb") as image_file:
         p.photo_data = str(base64.b64encode(image_file.read()))
     for color in content['person']['colors']:
@@ -272,20 +334,20 @@ def getphotodetails(b64, user_id=None):
         c.category = color['colorGeneralCategory']
         c.ratio = float(color['ratio'])
         p.colors.append(c)
-    p.colors.sort()
+    p.colors.sort(reverse=True)
     for style in content['person']['styles']:
         s = Style()
         s.name = style['styleName']
         s.confidence = float(style['confidence'])
         p.styles.append(s)
-    p.styles.sort()
+    p.styles.sort(reverse=True)
     for garment in content['person']['garments']:
         g = Garment()
         g.name = garment['typeName']
         g.confidence = float(garment['confidence'])
         g.bounding_box = garment['boundingBox']
         p.garments.append(g)
-    p.garments.sort()
+    p.garments.sort(reverse=True)
     return p
 
 
@@ -313,6 +375,11 @@ class User:
             return False
         content = json.loads(r.content)
         print(content)
+        try:
+            if len(content['person']['garments']) == 0:
+                return jsonify({'error': 'failed no garment found'})
+        except KeyError:
+            return jsonify({'error': 'failed no person found'})
         with open("temp.jpeg", "rb") as image_file:
             p.photo_data = str(base64.b64encode(image_file.read()))
         for color in content['person']['colors']:
@@ -322,20 +389,20 @@ class User:
             c.category = color['colorGeneralCategory']
             c.ratio = float(color['ratio'])
             p.colors.append(c)
-        p.colors.sort()
+        p.colors.sort(reverse=True)
         for style in content['person']['styles']:
             s = Style()
             s.name = style['styleName']
             s.confidence = float(style['confidence'])
             p.styles.append(s)
-        p.styles.sort()
+        p.styles.sort(reverse=True)
         for garment in content['person']['garments']:
             g = Garment()
             g.name = garment['typeName']
             g.confidence = float(garment['confidence'])
             g.bounding_box = garment['boundingBox']
             p.garments.append(g)
-        p.garments.sort()
+        p.garments.sort(reverse=True)
         self.photos.append(p)
         return True
 
@@ -370,12 +437,18 @@ class User:
         for elem in colortuple:
             self.top_colors.append(elem[0])
             self.top_colors_hex.append(hex_dict[elem[0]])
+            if len(self.top_colors) >= 5:
+                break
         garmenttuple = sorted(garments_dict.items(), reverse=True, key=lambda x: x[1])
         for elem in garmenttuple:
             self.top_garment.append(elem[0])
+            if len(self.top_garment) >= 5:
+                break
         styletuple = sorted(styles_dict.items(), reverse=True, key=lambda x: x[1])
         for elem in styletuple:
             self.top_styles.append(elem[0])
+            if len(self.top_styles) >= 5:
+                break
 
 
 class Photo:
@@ -432,8 +505,16 @@ class Cloth(Photo):
     def __init__(self):
         super().__init__()
         self.name = None
+        self.location = None
+        self.store_name = None
         self.store_id = None
         self.price = None
+
+    def confident(self):
+        return self.colors[0].ratio + self.styles[0].confidence
+
+    def __lt__(self, other):
+        return self.confident() < other.confident()
 
 
 if __name__ == '__main__':
