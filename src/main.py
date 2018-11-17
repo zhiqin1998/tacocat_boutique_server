@@ -8,13 +8,56 @@ import requests
 import werkzeug.exceptions
 from PIL import Image
 from flask import Flask, abort, jsonify, request
+from flask.json import JSONEncoder
 
 url = "https://fashion.recoqnitics.com/analyze"
 accessKey = "9ff85e93750d9449738a"
 secretKey = "2bd11d401fec71f18bdd261898e958f49f160f53"
 data = {'access_key': accessKey, 'secret_key': secretKey}
 
+
+class MyJSONEncoder(JSONEncoder):
+    def default(self, obj):
+        if isinstance(obj, User):
+            return {
+                'name': obj.name,
+                'photos': obj.photos,
+                'top_colors': obj.top_colors,
+                'top_colors_hex': obj.top_colors_hex,
+                'top_styles': obj.top_styles,
+                'top_garment': obj.top_garment,
+            }
+        if isinstance(obj, Photo):
+            return {
+                'photo_id': obj.photo_id,
+                'photo_data': obj.photo_data,
+                'colors': obj.colors,
+                'styles': obj.styles,
+                'garments': obj.garments,
+            }
+        if isinstance(obj, Color):
+            return {
+                'hex': obj.hex,
+                'color_name': obj.color_name,
+                'category': obj.category,
+                'ratio': obj.ratio,
+            }
+        if isinstance(obj, Garment):
+            return {
+                'name': obj.name,
+                'confidence': obj.confidence,
+                'bounding_box': obj.bounding_box,
+            }
+        if isinstance(obj, Style):
+            return {
+                'name': obj.name,
+                'confidence': obj.confidence,
+            }
+        return super(MyJSONEncoder, self).default(obj)
+
+
 app = Flask(__name__)
+app.json_encoder = MyJSONEncoder
 users = {}
 
 
@@ -44,7 +87,7 @@ def get_user():
         abort(404)
     else:
         user = users[user_id]
-        return jsonify({'user': user.toJSON()})
+        return jsonify({'user': user})
 
 
 @app.route('/getusertop', methods=['GET'])
@@ -69,7 +112,7 @@ def new_user():
     u.name = user_name
     id = len(users)
     users[id] = u
-    return jsonify({'user_id': id, 'user': u.toJSON()})
+    return jsonify({'user_id': id, 'user': u})
 
 
 @app.route('/newphoto', methods=['POST'])
@@ -179,10 +222,6 @@ class User:
         hextuple = sorted(hex_dict.items(), reverse=True, key=lambda x: x[1])
         for elem in hextuple:
             self.top_colors_hex.append(elem[0])
-
-    def toJSON(self):
-        return json.dumps(self, default=lambda o: o.__dict__,
-                          sort_keys=True, indent=4)
 
 
 class Photo:
