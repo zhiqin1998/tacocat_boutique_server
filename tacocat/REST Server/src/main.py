@@ -266,18 +266,23 @@ def suggestwithphoto():
         for c in s.cloth_list:
             got = False
             for garment in c.garments:
-                if garment.name in p.garments:
-                    got = True
-                    break
+                for pgarment in p.garments:
+                    if garment.name == pgarment.name:
+                        got = True
+                        break
             if got:
                 c.confidence = 0.00
                 for color in c.colors:
-                    if color.color_name in p.colors:
-                        c.confidence += color.ratio
+                    for pcolor in p.colors:
+                        if color.color_name == pcolor.color_name:
+                            c.confidence += color.ratio
                 for style in c.styles:
-                    if style.name in p.styles:
-                        c.confidence += style.confidence
-                cloth_list.append(c)
+                    for pstyle in p.styles:
+                        if style.name == pstyle.name:
+                            c.confidence += style.confidence
+                if c.confidence>0.2:
+                    print(c.confidence)
+                    cloth_list.append(c)
     cloth_list.sort(reverse=True)
     return jsonify({'cloth_list': cloth_list})
 
