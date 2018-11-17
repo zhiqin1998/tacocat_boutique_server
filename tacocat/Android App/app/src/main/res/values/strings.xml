@@ -1,0 +1,15 @@
+<resources>
+    <string name="app_name">Aickathon2018</string>
+    <string name="home">Home</string>
+    <string name="title_activity_dashboard">Dashboard</string>
+    <string name="title_home">Home</string>
+    <string name="title_dashboard">Upload</string>
+    <string name="title_notifications">Search</string>
+    <string name="title_camera">Camera</string>
+    <string name="title_gallery">Gallery</string>
+
+    <!-- TODO: Remove or change this placeholder text -->
+    <string name="hello_blank_fragment">Hello blank fragment</string>
+    <string name="search_description_1">Please take a photo</string>
+    <string name="search_description_2">Upload a photo</string>
+</resources>
