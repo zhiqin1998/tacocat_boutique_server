@@ -107,6 +107,7 @@ def handle_bad_request(e):
 
 @app.route('/')
 def index():
+    save()
     return json.dumps(users)
 
 
